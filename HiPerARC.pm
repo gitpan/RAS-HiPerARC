@@ -1,54 +1,70 @@
-### RAS::HiPerARC.pm
+## RAS::HiPerARC.pm
 ### PERL module for accessing a 3Com/USR Total Control HiPerARC
 #########################################################
 
 package RAS::HiPerARC;
-$VERSION = "1.01";
+$VERSION = "1.02";
 
-# The new method, of course
+use strict "subs"; use strict "refs";
+
+# This uses Net::Telnet to connect to the RAS
+use Net::Telnet ;
+
+# The name $ras will be used consistently as the
+# reference to the RAS::HiPerARC object we're handling
+
+# The constructor method, of course
 sub new {
-   my $class = shift ;
-   my $confarray = {} ;
-   %$confarray = @_ ;
-   bless $confarray ;
+   my($class) = shift ;
+   my($ras) = {} ;
+   %$ras = @_ ;
+   $ras->{'VERSION'} = $VERSION;
+   bless($ras);
 }
 
 
+# for debugging - printenv() prints to STDERR
+# the entire contents of %$ras
 sub printenv {
-   my($confarray) = $_[0];
-   print "VERSION = $VERSION\n";
-   while (($key,$value) = each(%$confarray)) { print "$key = $value\n"; }
+   my($ras) = shift;
+   while (($key,$value) = each(%$ras)) { warn "$key = $value\n"; }
 }
 
 
+# This runs the specified commands on the router and returns
+# a list of refs to arrays containing the commands' output
 sub run_command {
-   my($confarray) = shift;
-   use Net::Telnet ;
-   my($session,@returnlist,$command);
+   my($ras) = shift;
+   my(@returnlist);
 
    while ($command = shift) {
-      $session = new Net::Telnet;
+      my($session) = new Net::Telnet;
       $session->errmode("return");
-      $session->open($confarray->{hostname});
-      $session->login($confarray->{login},$confarray->{password});
+      $session->open($ras->{hostname});
       if ($session->errmsg) {
-         warn "RAS::HiPerARC ERROR: ", $session->errmsg, "\n"; return();
-      }
+         warn "ERROR: ",ref($ras),' - ',$session->errmsg,"\n"; return(); }
+      $session->login($ras->{login},$ras->{password});
+      if ($session->errmsg) {
+         warn "ERROR: ",ref($ras),' - ',$session->errmsg,"\n"; return(); }
+      $session->print("\n"); $session->waitfor('/HiPer>>\s+$/');
+      if ($session->errmsg) {
+         warn "ERROR: ",ref($ras),' - ',$session->errmsg,"\n"; return(); }
       $session->print($command);
       my(@output);
 
       while (1) {
-         local($line); $session->print(""); $line = $session->getline ;
+         $session->print(""); my($line) = $session->getline ;
          if ($session->errmsg) {
-            warn "RAS::HiPerARC ERROR: ", $session->errmsg, "\n"; return();
-         }
-         if ($line =~ /^HiPer>>\s+/) { $session->print('quit'); $session->close; last; }
+            warn "ERROR: ",ref($ras),' - ',$session->errmsg,"\n"; return(); }
+         if ($line =~ /^HiPer>>\s+/) {
+            $session->print('quit'); $session->close; last; }
+
          # After the 1st More prompt, the ARC sends
-         # ^M\s{a whole line's worth}^M
-         # to clear each line for printing
+         # ^M\s{a whole line's worth}^M to clear each line for printing
          $line =~ s/^--More--\s+\015?\s*\015?//;
          # Trim off trailing whitespace
          $line =~ s/\s*$/\n/;
+
          push(@output, $line);
       }
 
@@ -64,15 +80,16 @@ sub run_command {
 } # end of run_command
 
 
+# usergrep() - takes a username and returns an array of
+# ports on which the user was found
 sub usergrep {
-   my($confarray) = $_[0];
-   my($username) = $_[1]; return unless $username;
-   my(@foo) = &run_command($confarray,'list conn');
-   my($output) = shift(@foo);
+   my($ras) = shift;
+   my($username) = shift; return() unless $username;
+   my($output) = $ras->run_command('list connections');
    my(@ports);
 
    foreach (@$output) {
-      local($port,$user);
+      my($port,$user);
       next unless /^slot:\d+\/mod:\d+\s+/;
       $port = unpack("x0 a15", $_) ; $port =~ s/^\s*(\S+)\s*$/$1/;
       $user = unpack("x15 a20", $_); $user =~ s/^\s*(\S+)\s*$/$1/;
@@ -82,16 +99,16 @@ sub usergrep {
 }
 
 
+# portusage() returns a list: # of ports, list of users
 sub portusage {
-   my($confarray) = $_[0];
-   my($interfaces,$connections) = &run_command($confarray,'list interfaces','list connections');
+   my($ras) = shift;
+   my($interfaces,$connections) = $ras->run_command('list interfaces','list connections');
    my(@users);
-   my($totalports); $totalports = 0;
 
-   @$interfaces = grep(/^slot:\d+\/mod:\d+\s+/, @$interfaces);
+   @$interfaces = grep(/^slot:\d+\/mod:\d+\s+Up\s+Up\s*$/, @$interfaces);
 
    foreach (@$connections) {
-      local($port,$user);
+      my($port,$user);
       next unless /^slot:\d+\/mod:\d+\s+/;
       $user = unpack("x15 a20", $_); $user =~ s/^\s*(\S+)\s*$/$1/;
       next if ($user =~ /^\s*$/);
@@ -102,14 +119,15 @@ sub portusage {
 }
 
 
+# This does a usergrep() and then disconnects the specified user
 sub userkill {
-   my($confarray) = $_[0];
-   my($username); $username = $_[1]; return unless $username;
-   my(@ports) = &usergrep($confarray,$username);
-   return() unless @ports;
-   my($resetcmd) = "reset modems " . join(',',@ports);
+   my($ras) = shift;
+   my($username); $username = shift; return() unless $username;
+   my(@ports) = $ras->usergrep($username);
+   return('') unless @ports;
 
-   &run_command($confarray,$resetcmd);
+   my($resetcmd) = "reset modems " . join(',',@ports);
+   $ras->run_command($resetcmd);
    return(@ports);
 }
 
@@ -122,7 +140,7 @@ __END__;
 
 RAS::HiPerARC.pm - PERL Interface to 3Com/USR Total Control HiPerARC
 
-Version 1.01, December 20, 1999
+Version 1.02, January 17, 2000
 
 Gregor Mosheh (stigmata@blackangel.net)
 
@@ -159,9 +177,9 @@ At this time, the following methods are implemented:
 
 =over 4
 
-=item creating an object with new
+=item the constructor
 
-Call the new method while supplying the  "hostname", "login", and "password" hash, and you'll get an object reference returned.
+Call the new method while supplying the "hostname", "login", and "password" hash, and you'll get an object reference returned.
 
    Example:
       use RAS::HiPerARC;
@@ -170,6 +188,8 @@ Call the new method while supplying the  "hostname", "login", and "password" has
          login => '!root',
          password => 'mysecret'
       );
+
+Since there's no need to dynamically change the hostname, password, etc. there are no methods supplied to set these. The login name, hostname, and password must be supplied to the constructor. Failing to supply these won't generate an error, but it'll likely cause your program to not work...
 
 
 =item printenv
@@ -182,7 +202,7 @@ This is for debugging only. It prints to STDOUT a list of its configuration hash
 
 =item run_command
 
-This takes a list of commands to be executed on the ARC, connects to the ARC and executes the commands, and returns a list of references to arrays containg the text of each command's output. 
+This takes a list of commands to be executed on the ARC, executes the commands, and returns a list of references to arrays containg the text of each command's output. 
 
 Repeat: It doesn't return an array, it returns an array of references to arrays. Each array contains the text output of each command. Think of it as an array-enhanced version of PERL's `backtick` operator.
 
@@ -202,7 +222,7 @@ Repeat: It doesn't return an array, it returns an array of references to arrays.
 
 =item usergrep
 
-Supply a username as an argument, and usergrep will return an array of ports on which that user was found. Internally, this does a run_command("list connections") and parses the output.
+Supply a username as an argument, and usergrep will return an array of ports on which that user was found (or an empty array, if they're not found). If no username is supplied, returns undefined. Internally, this does a run_command('list connections') and parses the output.
 
    Example:
       @ports = $foo->usergrep('gregor');
@@ -211,7 +231,7 @@ Supply a username as an argument, and usergrep will return an array of ports on 
 
 =item userkill
 
-This does a usergrep, but with a twist: it disconnects the user by resetting the modem on which they're connected. Like usergrep, it returns an array of ports to which the user was connected before they were reset.  This is safe to use if the specified user is not logged in.
+This does a usergrep, but with a twist: it disconnects the user by resetting the modem on which they're connected. Like usergrep, it returns an array of ports to which the user was connected before they were reset or an empty array if they weren't found. An undef is returned if no username was supplied.
 
    Examples:
       @foo = $foo->userkill('gregor');
@@ -298,13 +318,15 @@ foreach ('arc1.example.com','arc2.example.com','arc3.example.com') {
 
 =head1 CHANGES IN THIS VERSION
 
+1.02     Fixed portusage() to only count Up interfaces. The ARC remembers modems even when they've been removed, and this accounts for that oddity. Cleaned up the code substantially. Fixed the prompt-matching code so that a prompt mismatch will cause run_command() to return instead of hanging in a loop.
+
 1.01     Added a test suite. Corrected some errors in the documentation. Improved error handling a bit.
 
 =head1 BUGS
 
 Since we use this for port usage monitoring, new functions will be added slowly on an as-needed basis. If you need some specific functionality let me know and I'll see what I can do. If you write an addition for this, please send it in and I'll incororate it and give credit.
 
-I make some assumptions about router prompts based on what I have on hand for experimentation. If I make an assumption that doesn't apply to you (e.g. all prompts are /^[a-zA-Z0-9]+\>\s+$/) then it can cause two problems: pattern match timed out or a hang when any functions are used. A pattern match timeout can occur because of a bad password or a bad prompt. A hang is likely caused by a bad prompt. Check the regexps in the loop within run_command, and make sure your prompt fits this regex. If not, either fix the regex and/or (even better) PLEASE send me some details on your prompt and what commands you used to set your prompt. If you have several routers with the same login/password, make sure you're pointing to the right one. A Livingston PM, for example, has a different prompt than a HiPerARC - if you accidentally point to a ARC using RAS::PortMaster, you'll likely be able to log in, but run_command will never exit, resulting in a hang.
+I make some assumptions about router prompts based on what I have on hand for experimentation. If I make an assumption that doesn't apply to you (e.g. all prompts are /^HiPer>>\s+$/) then it could cause "pattern match timeout" problems. If this happens to you, make sure you're using the correct RAS module (e.g. don't connect to a Livingston PortMaster with RAS::HiPerARC). If that's not the problem, check the regexps in the loop within run_command, and make sure your prompt fits this regex. If not, either fix the regex and/or (even better) PLEASE send me some details on your prompt and what commands you used to set your prompt.
 
 
 =head1 LICENSE AND WARRANTY
