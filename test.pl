@@ -39,6 +39,21 @@ print "Password for ARC: ";
 chomp($password = <STDIN>);
 
 
+
+print <<EOF;
+
+Please enter a regular expression representing
+the prompt on the HiPerARC. Do not include delimiters
+or anchors. If you enter nothing, the default
+of 'HiPer>> ' will be used, which usually works
+just fine.
+EOF
+
+print "Prompt for HiPerARC: ";
+chomp($prompt= <STDIN>);
+
+
+
 print <<EOF;
 
 The usergrep() test looks for a specified user on a bank
@@ -65,6 +80,7 @@ $foo = new RAS::HiPerARC(
    hostname => $pm,
    login => $login,
    password => $password,
+   prompt => $prompt,
 );
 die "ERROR: Couldn't create object. Stopped " unless $foo;
 print "OK.\n\n";
@@ -83,6 +99,16 @@ print "### Testing portusage() method:\n";
 print "There are ", shift(@x), " modems in all.\n";
 print "There are ", scalar(@x), " users online. ";
 print "They are:\n@x\n\n";
+
+print "### Testing userports() method:\n";
+%x = $foo->userports;
+print "USERNAME  \tPORTS\n";
+foreach (keys(%x)) {
+   print "$_", (' ' x (10 - length($_))), "\t", join("\t",@{$x{$_}}), "\n";
+}
+
+
+
 
 if ($testuser) {
    print "### Testing usergrep() method on user $testuser\n";

@@ -3,7 +3,7 @@
 #########################################################
 
 package RAS::HiPerARC;
-$VERSION = "1.02";
+$VERSION = "1.03";
 
 use strict "subs"; use strict "refs";
 
@@ -18,8 +18,12 @@ sub new {
    my($class) = shift ;
    my($ras) = {} ;
    %$ras = @_ ;
+
+   unless ($ras->{hostname}) { warn "ERROR: ", (ref($class) || $class), " - Hostname not specified.\n"; return(); }
    $ras->{'VERSION'} = $VERSION;
-   bless($ras);
+   $ras->{prompt} = 'HiPer>> ' unless $ras->{prompt};
+
+   bless($ras, ref($class) || $class);
 }
 
 
@@ -36,28 +40,28 @@ sub printenv {
 sub run_command {
    my($ras) = shift;
    my(@returnlist);
+   my($prompt) = '/' . $ras->{prompt} . '$/';
 
    while ($command = shift) {
       my($session) = new Net::Telnet;
       $session->errmode("return");
       $session->open($ras->{hostname});
       if ($session->errmsg) {
-         warn "ERROR: ",ref($ras),' - ',$session->errmsg,"\n"; return(); }
+         warn "ERROR: ",ref($ras)," - Cannot connect to host $ras->{hostname} - ",$session->errmsg,"\n"; return(); }
       $session->login($ras->{login},$ras->{password});
       if ($session->errmsg) {
-         warn "ERROR: ",ref($ras),' - ',$session->errmsg,"\n"; return(); }
-      $session->print("\n"); $session->waitfor('/HiPer>>\s+$/');
+         warn "ERROR: ",ref($ras)," - Logging in to host $ras->{hostname} - ",$session->errmsg,"\n"; return(); }
+      $session->print("\n"); $session->waitfor($prompt);
       if ($session->errmsg) {
-         warn "ERROR: ",ref($ras),' - ',$session->errmsg,"\n"; return(); }
+         warn "ERROR: ",ref($ras)," - Waiting for command prompt on host $ras->{hostname} - ",$session->errmsg,"\n"; return(); }
       $session->print($command);
       my(@output);
 
       while (1) {
          $session->print(""); my($line) = $session->getline ;
          if ($session->errmsg) {
-            warn "ERROR: ",ref($ras),' - ',$session->errmsg,"\n"; return(); }
-         if ($line =~ /^HiPer>>\s+/) {
-            $session->print('quit'); $session->close; last; }
+            warn "ERROR: ",ref($ras)," - Waiting on output from command \"$command\" on host $ras->{hostname} - ",$session->errmsg,"\n"; return(); }
+         if ($line =~ /^$ras->{prompt}$/) { $session->print('quit'); $session->close; last; }
 
          # After the 1st More prompt, the ARC sends
          # ^M\s{a whole line's worth}^M to clear each line for printing
@@ -96,6 +100,25 @@ sub usergrep {
       ($user eq $username) && push(@ports,$port);
    }
    return(@ports);
+}
+
+
+# userports() returns a hash of arrays
+# keys are the usernames of all users currently connected
+# values are arrays of ports that that user in connected on
+sub userports {
+   my($ras) = shift;
+   my($output) = $ras->run_command('list conn');
+   my(%userports);
+
+   foreach (@$output) {
+      my($port,$user);
+      next unless /^slot:\d+\/mod:\d+\s+/;
+      $port = unpack("x0 a15", $_) ; $port =~ s/^\s*(\S+)\s*$/$1/;
+      $user = unpack("x15 a20", $_); $user =~ s/^\s*(\S+)\s*$/$1/;
+      push(@{$userports{$user}},$port);
+   }
+   return(%userports);
 }
 
 
@@ -140,9 +163,8 @@ __END__;
 
 RAS::HiPerARC.pm - PERL Interface to 3Com/USR Total Control HiPerARC
 
-Version 1.02, January 17, 2000
+Version 1.03, June 9, 2000
 
-Gregor Mosheh (stigmata@blackangel.net)
 
 =head1 SYNOPSIS
 
@@ -177,19 +199,29 @@ At this time, the following methods are implemented:
 
 =over 4
 
-=item the constructor
 
-Call the new method while supplying the "hostname", "login", and "password" hash, and you'll get an object reference returned.
+=item creating an object with new
+
+Use the new() method to create a new object.
 
    Example:
       use RAS::HiPerARC;
       $foo = new RAS::HiPerARC(
          hostname => 'dialup1.example.com',
          login => '!root',
-         password => 'mysecret'
+         password => 'mysecret',
       );
 
-Since there's no need to dynamically change the hostname, password, etc. there are no methods supplied to set these. The login name, hostname, and password must be supplied to the constructor. Failing to supply these won't generate an error, but it'll likely cause your program to not work...
+The following variables are useful:
+   hostname - The hostname of the router to connect to
+   login - The login name to get a command-line on the router
+   password - The password to the login name supplied
+   prompt - See below
+
+
+Since there's no point in dynamically changing the hostname, login, etc. these settings are static and must be supplied to the constructor. No error will be returned if these settings are not specified (except for the hostname, which is required), but your program will likely not get very far without at least a hostname and a correct password.
+
+Prompt handling has been vastly improved. If a prompt is not specified, a reasonable default is assumed that should work just fine. If you want to specify a prompt, supply a regular expression without delimiters or anchors that represents your router's prompt, e.g. prompt => 'hiper>' If you get errors about a bad match operator or a bad delimiter, you likely have a bad prompt string.
 
 
 =item printenv
@@ -257,6 +289,19 @@ This returns an array consisting of 2 items: The 1st element is the number of po
       print "Ports total: ", $ports, "\n";
 
 
+=item userports
+
+This returns a hash with the key of each item being a username. The value of each item is an array of the ports that that username is currently using. This provides some information that a simple usergrep() lacks.
+
+   Example:
+      %userports = $foo->userports;
+      foreach $user (keys(%userports)) {
+        foreach $port (@{$userports{$user}}) {
+             print "User: $user is on $port\n";
+         }
+      }
+
+
 =head1 EXAMPLE PROGRAMS
 
 portusage.pl - Prints a summary of port usage on a bank of modems
@@ -318,15 +363,27 @@ foreach ('arc1.example.com','arc2.example.com','arc3.example.com') {
 
 =head1 CHANGES IN THIS VERSION
 
+1.03     Added userports() method. Added better prompt support (YAY!). Made error messages more useful.
+
 1.02     Fixed portusage() to only count Up interfaces. The ARC remembers modems even when they've been removed, and this accounts for that oddity. Cleaned up the code substantially. Fixed the prompt-matching code so that a prompt mismatch will cause run_command() to return instead of hanging in a loop.
 
 1.01     Added a test suite. Corrected some errors in the documentation. Improved error handling a bit.
 
+
+=head1 AUTHORS, MAINTAINERS, AND CONTACT INFO
+
+RAS::HiPerARC uses the Net::Telnet module by Jay Rogers <jay@rgrs.com> - thank you, Jay!
+
+Gregor Mosheh <stigmata@blackangel.net> wrote RAS::HiPerARC originally, but the prompt handling needed some help in case people cuztomized their prompts.
+
+Luke Robins <luker@vicnet.net.au> and Todd Caine <todd_caine@eli.net> helped out substantially with the prompt handling with RAS::AS5200 and the changes were carried over into RAS::HiPerARC. Thank you, Luke and Todd!
+
+The maintainer of RAS::HiPerARC is Gregor Mosheh, at the address above.
+
+
 =head1 BUGS
 
 Since we use this for port usage monitoring, new functions will be added slowly on an as-needed basis. If you need some specific functionality let me know and I'll see what I can do. If you write an addition for this, please send it in and I'll incororate it and give credit.
-
-I make some assumptions about router prompts based on what I have on hand for experimentation. If I make an assumption that doesn't apply to you (e.g. all prompts are /^HiPer>>\s+$/) then it could cause "pattern match timeout" problems. If this happens to you, make sure you're using the correct RAS module (e.g. don't connect to a Livingston PortMaster with RAS::HiPerARC). If that's not the problem, check the regexps in the loop within run_command, and make sure your prompt fits this regex. If not, either fix the regex and/or (even better) PLEASE send me some details on your prompt and what commands you used to set your prompt.
 
 
 =head1 LICENSE AND WARRANTY
