@@ -3,15 +3,12 @@
 #######################################################
 
 
-### Get the username to seek/kill with the usergrep()
-### and userkill() functions
-
 print <<EOF;
 
 Test Suite for RAS::HiPerARC
 EOF
 
-### Get the list of ARCs to scan/test
+### Get the hostname of the ARC to test
 print <<EOF;
 
 The tests will connect to a HiPerARC
@@ -29,12 +26,14 @@ exit unless $pm;
 
 print <<EOF;
 
-Please enter the username and password used to
-log into the ARC for the tests. This user should 
-be able to login to the ARC and get a command prompt.
+Please enter the login and password used 
+to log into the ARC for the tests. This
+login and password should start an interactive
+shell with the ARC (e.g. a MANAGE user), not 
+a PPP session (e.g. a NETWORK user).
 EOF
 
-print "Login name for ARC: ";
+print "Login for ARC: ";
 chomp($login = <STDIN>);
 print "Password for ARC: ";
 chomp($password = <STDIN>);
@@ -43,11 +42,11 @@ chomp($password = <STDIN>);
 print <<EOF;
 
 The usergrep() test looks for a specified user on a bank
-of RAS devices. The userkill() function will look for
+of ARCs. The userkill() function will look for
 the specified user and knock them offline.
 Specify here the user that will be located
-and terminated. Enter nothing for these tests
-to be skipped.
+and terminated. Enter nothing for 
+these tests to be skipped.
 EOF
 
 print "Username for seek/kill tests: ";
@@ -61,7 +60,7 @@ print "\n\n";
 use RAS::HiPerARC;
 
 ### Create a new instance
-print "### Testing new() method for host $_\n\n";
+print "### Testing new() method for host $pm\n\n";
 $foo = new RAS::HiPerARC(
    hostname => $pm,
    login => $login,
@@ -75,9 +74,9 @@ $foo->printenv;
 print "\n\n";
 
 print "### Testing the run_command() method:\n";
-($x,$y) = $foo->run_command('list ip routes','show user default');
-print "Output of \'list ip routes\' on $_:\n@$x\n\n";
-print "Output of \'show user default\' on $_:\n@$y\n\n";
+($x,$y) = $foo->run_command('list interfaces','list connections');
+print "Output of \'list interfaces\' on $pm:\n@$x\n\n";
+print "Output of \'list connections\' on $pm:\n@$y\n\n";
 
 print "### Testing portusage() method:\n";
 @x = $foo->portusage;

@@ -1,9 +1,9 @@
-### HiPerARC.pm
+### RAS::HiPerARC.pm
 ### PERL module for accessing a 3Com/USR Total Control HiPerARC
 #########################################################
 
 package RAS::HiPerARC;
-$VERSION = "1.00";
+$VERSION = "1.01";
 
 # The new method, of course
 sub new {
@@ -16,6 +16,7 @@ sub new {
 
 sub printenv {
    my($confarray) = $_[0];
+   print "VERSION = $VERSION\n";
    while (($key,$value) = each(%$confarray)) { print "$key = $value\n"; }
 }
 
@@ -27,13 +28,20 @@ sub run_command {
 
    while ($command = shift) {
       $session = new Net::Telnet;
+      $session->errmode("return");
       $session->open($confarray->{hostname});
       $session->login($confarray->{login},$confarray->{password});
+      if ($session->errmsg) {
+         warn "RAS::HiPerARC ERROR: ", $session->errmsg, "\n"; return();
+      }
       $session->print($command);
       my(@output);
 
       while (1) {
          local($line); $session->print(""); $line = $session->getline ;
+         if ($session->errmsg) {
+            warn "RAS::HiPerARC ERROR: ", $session->errmsg, "\n"; return();
+         }
          if ($line =~ /^HiPer>>\s+/) { $session->print('quit'); $session->close; last; }
          # After the 1st More prompt, the ARC sends
          # ^M\s{a whole line's worth}^M
@@ -114,7 +122,7 @@ __END__;
 
 RAS::HiPerARC.pm - PERL Interface to 3Com/USR Total Control HiPerARC
 
-Version 1.00, December 6, 1999
+Version 1.01, December 20, 1999
 
 Gregor Mosheh (stigmata@blackangel.net)
 
@@ -133,9 +141,13 @@ Installation is easy, thanks to MakeMaker:
 
 =item 1.
 
-"perl Makefile.PL && make && make install"
+"perl Makefile.PL && make && make test"
 
 =item 2.
+
+If the tests worked all right, "make install"
+
+=item 3.
 
 Check out the examples in this documentation.
 
@@ -153,7 +165,7 @@ Call the new method while supplying the  "hostname", "login", and "password" has
 
    Example:
       use RAS::HiPerARC;
-      $foo = new HiPerARC(
+      $foo = new RAS::HiPerARC(
          hostname => 'dialup1.example.com',
          login => '!root',
          password => 'mysecret'
@@ -232,7 +244,7 @@ portusage.pl - Prints a summary of port usage on a bank of modems
 use RAS::HiPerARC;
 $used = $total = 0;
 foreach ('arc1.example.com','arc2.example.com','arc3.example.com') {
-   $foo = new HiPerARC(
+   $foo = new RAS::HiPerARC(
       hostname => $_,
       login => '!root',
       password => 'mysecret'
@@ -254,7 +266,7 @@ die "Usage: $0 <username>\nFinds the specified user.\n" unless $username ;
 
 use RAS::HiPerARC;
 foreach ('arc1.example.com','arc2.example.com','arc3.example.com') {
-   $foo = new HiPerARC(
+   $foo = new RAS::HiPerARC(
       hostname => $_,
       login => '!root',
       password => 'mysecret'
@@ -273,7 +285,7 @@ die "Usage: $0 <username>\nDisconnects the specified user.\n" unless $username ;
 
 use RAS::HiPerARC;
 foreach ('arc1.example.com','arc2.example.com','arc3.example.com') {
-   $foo = new HiPerARC(
+   $foo = new RAS::HiPerARC(
       hostname => $_,
       login => '!root',
       password => 'mysecret'
@@ -284,15 +296,16 @@ foreach ('arc1.example.com','arc2.example.com','arc3.example.com') {
 }
 
 
-=head1 BUGS
-
-This is one of my first tries at doing PERL 5 stuff, having been satisfied for so many years with using only the PERL 4 features. Though this module seems to work without any problems, the code is probably kinda weak in places and could stand optimization. Any suggestions will be appreciated and credit will be given.
-
-More features are forthcoming. I realize that the existing set of functions is a bit bare. If you need special features, please ask and I'll work on them in my spare time. Alternately, you can write it yourself and send it in and I'll gladly incorporate it and give credit. And there's always the run_command method.
-
 =head1 CHANGES IN THIS VERSION
 
-1.00     First released version of RAS::HiPerARC. Learned a lot from RAS::PortMaster, so this one is faster, has a test suite, etc.
+1.01     Added a test suite. Corrected some errors in the documentation. Improved error handling a bit.
+
+=head1 BUGS
+
+Since we use this for port usage monitoring, new functions will be added slowly on an as-needed basis. If you need some specific functionality let me know and I'll see what I can do. If you write an addition for this, please send it in and I'll incororate it and give credit.
+
+I make some assumptions about router prompts based on what I have on hand for experimentation. If I make an assumption that doesn't apply to you (e.g. all prompts are /^[a-zA-Z0-9]+\>\s+$/) then it can cause two problems: pattern match timed out or a hang when any functions are used. A pattern match timeout can occur because of a bad password or a bad prompt. A hang is likely caused by a bad prompt. Check the regexps in the loop within run_command, and make sure your prompt fits this regex. If not, either fix the regex and/or (even better) PLEASE send me some details on your prompt and what commands you used to set your prompt. If you have several routers with the same login/password, make sure you're pointing to the right one. A Livingston PM, for example, has a different prompt than a HiPerARC - if you accidentally point to a ARC using RAS::PortMaster, you'll likely be able to log in, but run_command will never exit, resulting in a hang.
+
 
 =head1 LICENSE AND WARRANTY
 
